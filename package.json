@@ -1,0 +1,14 @@
+{
+  "name": "f911-console",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/api",
+    "build": "npm run build -w apps/api",
+    "start": "npm run start -w apps/api"
+  }
+}

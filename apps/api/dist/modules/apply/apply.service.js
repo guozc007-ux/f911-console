@@ -1,0 +1,217 @@
+"use strict";
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ApplyService = void 0;
+const typeorm_1 = require("typeorm");
+const common_1 = require("@nestjs/common");
+const typeorm_2 = require("@nestjs/typeorm");
+const apply_entity_1 = require("../../entities/apply.entity");
+const user_entity_1 = require("../../entities/user.entity");
+const responses_1 = require("../../responses");
+const responses_2 = require("../../responses");
+const business_exception_1 = require("../../common/filters/business.exception");
+let ApplyService = class ApplyService {
+    constructor(applyRepository, userRepository) {
+        this.applyRepository = applyRepository;
+        this.userRepository = userRepository;
+    }
+    async findPaginated(query) {
+        const qb = this.applyRepository
+            .createQueryBuilder('apply')
+            .select(this.getPublicColumns())
+            .where('apply.deletedAt IS NULL')
+            .skip((query.page - 1) * query.pageSize)
+            .take(query.pageSize)
+            .orderBy('apply.createdAt', 'DESC');
+        if (query.userId !== undefined) {
+            qb.andWhere('apply.userId = :userId', { userId: query.userId });
+        }
+        if (query.checkStatus !== undefined) {
+            qb.andWhere('apply.checkStatus = :checkStatus', { checkStatus: query.checkStatus });
+        }
+        if (query.remit !== undefined) {
+            qb.andWhere('apply.remit = :remit', { remit: query.remit });
+        }
+        if (query.status !== undefined) {
+            qb.andWhere('apply.status = :status', { status: query.status });
+        }
+        if (query.keyword) {
+            qb.andWhere(new typeorm_1.Brackets((builder) => {
+                builder
+                    .where('apply.alipayAccount LIKE :keyword', { keyword: `%${query.keyword}%` })
+                    .orWhere('apply.alipayName LIKE :keyword', { keyword: `%${query.keyword}%` });
+            }));
+        }
+        const [applies, total] = await qb.getManyAndCount();
+        return responses_1.PaginatedDto.of(applies.map((apply) => this.toSafeApply(apply)), total, query.page, query.pageSize);
+    }
+    async findById(applyId) {
+        const apply = await this.applyRepository.findOne({
+            where: { applyId },
+            select: this.getPublicSelect(),
+        });
+        if (!apply) {
+            throw new business_exception_1.BusinessException(responses_2.BusinessCode.APPLY_NOT_FOUND);
+        }
+        return this.toSafeApply(apply);
+    }
+    async create(dto) {
+        await this.ensureUserExists(dto.userId);
+        await this.ensureSufficientBalance(dto.userId, dto.money);
+        const apply = this.applyRepository.create({
+            userId: dto.userId,
+            money: this.toMoney(dto.money),
+            alipayAccount: dto.alipayAccount,
+            alipayName: dto.alipayName,
+            checkStatus: 0,
+            checkRemark: '',
+            checkOperatorId: 0,
+            checkTime: null,
+            remit: 0,
+            remitTime: null,
+            remitRemark: '',
+            status: dto.status ?? 1,
+        });
+        const saved = await this.applyRepository.save(apply);
+        return this.toSafeApply(saved);
+    }
+    async update(applyId, dto) {
+        const apply = await this.applyRepository.findOne({ where: { applyId } });
+        if (!apply) {
+            throw new business_exception_1.BusinessException(responses_2.BusinessCode.APPLY_NOT_FOUND);
+        }
+        if (dto.userId !== undefined) {
+            await this.ensureUserExists(dto.userId);
+            apply.userId = dto.userId;
+        }
+        if (dto.money !== undefined) {
+            await this.ensureSufficientBalance(apply.userId, dto.money);
+            apply.money = this.toMoney(dto.money);
+        }
+        if (dto.alipayAccount !== undefined) {
+            apply.alipayAccount = dto.alipayAccount;
+        }
+        if (dto.alipayName !== undefined) {
+            apply.alipayName = dto.alipayName;
+        }
+        if (dto.status !== undefined) {
+            apply.status = dto.status;
+        }
+        const updated = await this.applyRepository.save(apply);
+        return this.toSafeApply(updated);
+    }
+    async updateCheckStatus(applyId, dto) {
+        const apply = await this.applyRepository.findOne({ where: { applyId } });
+        if (!apply) {
+            throw new business_exception_1.BusinessException(responses_2.BusinessCode.APPLY_NOT_FOUND);
+        }
+        apply.checkStatus = dto.checkStatus;
+        apply.checkRemark = dto.checkRemark ?? '';
+        apply.checkOperatorId = dto.checkOperatorId ?? 0;
+        apply.checkTime = new Date();
+        if (dto.checkStatus === 2) {
+            apply.remit = 0;
+            apply.remitTime = null;
+            apply.remitRemark = '';
+        }
+        const updated = await this.applyRepository.save(apply);
+        return this.toSafeApply(updated);
+    }
+    async updateRemitStatus(applyId, dto) {
+        const apply = await this.applyRepository.findOne({ where: { applyId } });
+        if (!apply) {
+            throw new business_exception_1.BusinessException(responses_2.BusinessCode.APPLY_NOT_FOUND);
+        }
+        if (apply.checkStatus !== 1) {
+            throw new business_exception_1.BusinessException(responses_2.BusinessCode.REPORT_ALREADY_PROCESSED, '提现申请未审核通过');
+        }
+        apply.remit = dto.remit;
+        apply.remitRemark = dto.remitRemark ?? '';
+        apply.remitTime = dto.remit === 2 ? new Date() : null;
+        const updated = await this.applyRepository.save(apply);
+        return this.toSafeApply(updated);
+    }
+    async remove(applyId) {
+        await this.findById(applyId);
+        await this.applyRepository.softDelete(applyId);
+    }
+    async ensureUserExists(userId) {
+        const user = await this.userRepository.findOne({ where: { userId }, select: { userId: true, depositPay: true } });
+        if (!user) {
+            throw new business_exception_1.BusinessException(responses_2.BusinessCode.USER_NOT_FOUND);
+        }
+    }
+    async ensureSufficientBalance(userId, money) {
+        const user = await this.userRepository.findOne({ where: { userId }, select: { userId: true, depositPay: true } });
+        if (!user) {
+            throw new business_exception_1.BusinessException(responses_2.BusinessCode.USER_NOT_FOUND);
+        }
+        if (Number(user.depositPay) < money) {
+            throw new business_exception_1.BusinessException(responses_2.BusinessCode.INSUFFICIENT_BALANCE);
+        }
+    }
+    toSafeApply(apply) {
+        const { deletedAt, ...safe } = apply;
+        return safe;
+    }
+    toMoney(value) {
+        return value.toFixed(2);
+    }
+    getPublicSelect() {
+        return {
+            applyId: true,
+            userId: true,
+            money: true,
+            alipayAccount: true,
+            alipayName: true,
+            checkStatus: true,
+            checkRemark: true,
+            checkOperatorId: true,
+            checkTime: true,
+            remit: true,
+            remitTime: true,
+            remitRemark: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+        };
+    }
+    getPublicColumns() {
+        return [
+            'apply.applyId',
+            'apply.userId',
+            'apply.money',
+            'apply.alipayAccount',
+            'apply.alipayName',
+            'apply.checkStatus',
+            'apply.checkRemark',
+            'apply.checkOperatorId',
+            'apply.checkTime',
+            'apply.remit',
+            'apply.remitTime',
+            'apply.remitRemark',
+            'apply.status',
+            'apply.createdAt',
+            'apply.updatedAt',
+        ];
+    }
+};
+exports.ApplyService = ApplyService;
+exports.ApplyService = ApplyService = __decorate([
+    (0, common_1.Injectable)(),
+    __param(0, (0, typeorm_2.InjectRepository)(apply_entity_1.Apply)),
+    __param(1, (0, typeorm_2.InjectRepository)(user_entity_1.User)),
+    __metadata("design:paramtypes", [typeorm_1.Repository,
+        typeorm_1.Repository])
+], ApplyService);

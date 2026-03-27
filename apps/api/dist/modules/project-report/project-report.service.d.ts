@@ -1,0 +1,34 @@
+import { Repository } from 'typeorm';
+import { ProjectReport } from '../../entities/project-report.entity';
+import { User } from '../../entities/user.entity';
+import { Boss } from '../../entities/boss.entity';
+import { Category } from '../../entities/category.entity';
+import { BossType } from '../../entities/boss-type.entity';
+import { PlayerLevel } from '../../entities/player-level.entity';
+import { PaginatedDto } from '../../responses';
+import { CreateProjectReportDto, ListProjectReportDto, UpdateProjectReportDto, UpdateProjectReportPayStatusDto, UpdateProjectReportStatusDto } from './dto/project-report.dto';
+type SafeProjectReport = Omit<ProjectReport, 'deletedAt'>;
+export declare class ProjectReportService {
+    private readonly projectReportRepository;
+    private readonly userRepository;
+    private readonly bossRepository;
+    private readonly categoryRepository;
+    private readonly bossTypeRepository;
+    private readonly playerLevelRepository;
+    constructor(projectReportRepository: Repository<ProjectReport>, userRepository: Repository<User>, bossRepository: Repository<Boss>, categoryRepository: Repository<Category>, bossTypeRepository: Repository<BossType>, playerLevelRepository: Repository<PlayerLevel>);
+    findPaginated(query: ListProjectReportDto): Promise<PaginatedDto<SafeProjectReport>>;
+    findById(projectReportId: number): Promise<SafeProjectReport>;
+    create(dto: CreateProjectReportDto): Promise<SafeProjectReport>;
+    update(projectReportId: number, dto: UpdateProjectReportDto): Promise<SafeProjectReport>;
+    updateStatus(projectReportId: number, dto: UpdateProjectReportStatusDto): Promise<SafeProjectReport>;
+    updatePayStatus(projectReportId: number, dto: UpdateProjectReportPayStatusDto): Promise<SafeProjectReport>;
+    remove(projectReportId: number): Promise<void>;
+    private resolveRelations;
+    private ensureUserExists;
+    private calculateAmounts;
+    private toMoney;
+    private toSafeProjectReport;
+    private getPublicSelect;
+    private getPublicColumns;
+}
+export {};
